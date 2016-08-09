@@ -7,3 +7,4 @@ authors = ["Lee Bousfield <ljbousfield@gmail.com>"]
 libc = "0.2.15"
 clap = "2.10.0"
 hyper = "0.9"
+rustc-serialize = "0.3"

@@ -9,6 +9,12 @@ use utils;
 use openssl;
 use openssl_ffi;
 
+#[derive(RustcEncodable)]
+pub struct CipherResult {
+    pub cipher: String,
+    pub string: String
+}
+
 fn check_data(ciphertext: &Vec<u8>, cipher: *const openssl_ffi::EVP_CIPHER, key_iv_pair: &openssl::KeyIvPair) -> Option<String> {
     match openssl::decrypt(ciphertext, cipher, key_iv_pair) {
         None => None,
@@ -21,7 +27,7 @@ fn check_data(ciphertext: &Vec<u8>, cipher: *const openssl_ffi::EVP_CIPHER, key_
     }
 }
 
-pub fn run_passwords<T>(possible_ciphertexts: &str, possible_ciphers: &str, passwords: Box<T>) -> Vec<String> where T: IntoIterator<Item=Vec<u8>> {
+pub fn run_passwords<T>(possible_ciphertexts: &str, possible_ciphers: &str, passwords: Box<T>) -> Vec<CipherResult> where T: IntoIterator<Item=Vec<u8>> {
     openssl::init_crypto();
     let mut ciphers_file = File::open(possible_ciphers).unwrap();
     let mut ciphers_string = String::new();
@@ -54,8 +60,8 @@ pub fn run_passwords<T>(possible_ciphertexts: &str, possible_ciphers: &str, pass
         .collect::<Vec<_>>();
     let mut result = vec![];
     for password in passwords.iter() {
-        let mut threads = vec![];
         for cipher in ciphers.iter() {
+            let mut threads = vec![];
             let possible_key = openssl::get_key_iv_pair(openssl::get_cipher_by_name(cipher).unwrap(), password);
             match possible_key {
                 Some(key_iv_pair) => {
@@ -66,14 +72,14 @@ pub fn run_passwords<T>(possible_ciphertexts: &str, possible_ciphers: &str, pass
                             check_data(&ciphertext, openssl::get_cipher_by_name(&cipher).unwrap(), &key_iv_pair)
                         }));
                     }
-                },
-                None => println!("key creation failed")
+                }
+                None => {}
             }
-        }
-        for thread in threads {
-            match thread.join().unwrap() {
-                Some(string) => result.push(string),
-                None => continue
+            for thread in threads {
+                match thread.join().unwrap() {
+                    Some(string) => result.push(CipherResult { cipher: cipher.clone(), string: string }),
+                    None => continue
+                }
             }
         }
     }

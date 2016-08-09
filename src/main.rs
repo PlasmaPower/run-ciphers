@@ -6,9 +6,12 @@ extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
 
 extern crate hyper;
-use self::hyper::server::{Server, Request, Response};
-use self::hyper::uri::RequestUri;
-use self::hyper::status::StatusCode;
+use hyper::server::{Server, Request, Response};
+use hyper::uri::RequestUri;
+use hyper::status::StatusCode;
+
+extern crate rustc_serialize;
+use rustc_serialize::json;
 
 mod openssl;
 mod openssl_ffi;
@@ -67,20 +70,20 @@ fn main() {
     if let Some(matches) = matches.subcommand_matches("files") {
         let passwords = matches.values_of("file").unwrap()
             .map(|arg| utils::read_binary_file(&Path::new(arg)));
-        for pass in run_passwords!(passwords) {
-            println!("FOUND UTF-8 STRING!!!\n{}", pass);
+        for res in run_passwords!(passwords) {
+            println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if let Some(matches) = matches.subcommand_matches("args") {
         let passwords = matches.values_of("password").unwrap().map(|string| Vec::from(string.as_bytes()));
-        for pass in run_passwords!(passwords) {
-            println!("FOUND UTF-8 STRING!!!\n{}", pass);
+        for res in run_passwords!(passwords) {
+            println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if matches.subcommand_matches("stdin").is_some() {
         let mut stdin_str: String = String::new();
         io::stdin().read_to_string(&mut stdin_str).unwrap();
         let passwords = stdin_str.split("\n").filter(|str| str.len() > 0).map(|str| Vec::from(str.as_bytes()));
-        for pass in run_passwords!(passwords) {
-            println!("FOUND UTF-8 STRING!!!\n{}", pass);
+        for res in run_passwords!(passwords) {
+            println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if let Some(matches) = matches.subcommand_matches("http") {
         Server::http(matches.value_of("listen-address").unwrap()).unwrap().handle_threads(move |req: Request, mut res: Response| {
@@ -92,7 +95,13 @@ fn main() {
                         return;
                     }
                     match panic::catch_unwind(|| run_passwords!(vec![string[1..].as_bytes().iter().map(|n| n.clone()).collect()])) {
-                        Ok(result) => res.send(result.join("\n\n\n\n").as_bytes()).unwrap(),
+                        Ok(result) => match json::encode(&result) {
+                            Ok(string) => res.send(string.as_bytes()).unwrap(),
+                            Err(_) => {
+                                *res.status_mut() = StatusCode::InternalServerError;
+                                res.send(b"Internal server error.").unwrap();
+                            }
+                        },
                         Err(_) => {
                             *res.status_mut() = StatusCode::InternalServerError;
                             res.send(b"Internal server error.").unwrap();
