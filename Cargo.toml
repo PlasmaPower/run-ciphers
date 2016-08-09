@@ -1,0 +1,9 @@
+[package]
+name = "run-ciphers"
+version = "1.0.0"
+authors = ["Lee Bousfield <ljbousfield@gmail.com>"]
+
+[dependencies]
+libc = "0.2.15"
+clap = "2.10.0"
+hyper = "0.9"
