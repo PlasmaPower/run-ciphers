@@ -1,6 +1,5 @@
 use std::path::Path;
 use std::io::{self, Read};
-use std::panic;
 
 extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
@@ -16,7 +15,9 @@ use rustc_serialize::json;
 mod openssl;
 mod openssl_ffi;
 mod utils;
-mod run_passwords;
+mod decryption_context;
+
+use decryption_context::DecryptionContext;
 
 fn main() {
     let matches = App::new("Run Ciphers")
@@ -64,25 +65,23 @@ fn main() {
 
     let possible_ciphertexts = String::from(matches.value_of("possible-ciphertexts").unwrap());
     let possible_ciphers = String::from(matches.value_of("possible-ciphers").unwrap());
-    macro_rules! run_passwords {
-        ($passwords: expr) => (run_passwords::run_passwords(&possible_ciphertexts, &possible_ciphers, Box::new($passwords)));
-    }
+    let decryption_context = DecryptionContext::new(&possible_ciphertexts, &possible_ciphers);
     if let Some(matches) = matches.subcommand_matches("files") {
         let passwords = matches.values_of("file").unwrap()
             .map(|arg| utils::read_binary_file(&Path::new(arg)));
-        for res in run_passwords!(passwords) {
+        for res in decryption_context.decrypt(passwords) {
             println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if let Some(matches) = matches.subcommand_matches("args") {
         let passwords = matches.values_of("password").unwrap().map(|string| Vec::from(string.as_bytes()));
-        for res in run_passwords!(passwords) {
+        for res in decryption_context.decrypt(passwords) {
             println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if matches.subcommand_matches("stdin").is_some() {
         let mut stdin_str: String = String::new();
         io::stdin().read_to_string(&mut stdin_str).unwrap();
         let passwords = stdin_str.split("\n").filter(|str| str.len() > 0).map(|str| Vec::from(str.as_bytes()));
-        for res in run_passwords!(passwords) {
+        for res in decryption_context.decrypt(passwords) {
             println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if let Some(matches) = matches.subcommand_matches("http") {
@@ -91,26 +90,17 @@ fn main() {
                 RequestUri::AbsolutePath(string) => {
                     if !string.starts_with('/') {
                         *res.status_mut() = StatusCode::BadRequest;
-                        res.send(b"Invalid path.").unwrap();
+                        let _ = res.send(b"Invalid path.");
                         return;
                     }
-                    match panic::catch_unwind(|| run_passwords!(vec![string[1..].as_bytes().iter().map(|n| n.clone()).collect()])) {
-                        Ok(result) => match json::encode(&result) {
-                            Ok(string) => res.send(string.as_bytes()).unwrap(),
-                            Err(_) => {
-                                *res.status_mut() = StatusCode::InternalServerError;
-                                res.send(b"Internal server error.").unwrap();
-                            }
-                        },
-                        Err(_) => {
-                            *res.status_mut() = StatusCode::InternalServerError;
-                            res.send(b"Internal server error.").unwrap();
-                        }
+                    match json::encode(&decryption_context.decrypt(vec![string[1..].as_bytes().iter().map(|n| n.clone()).collect()])) {
+                        Ok(str) => { let _ = res.send(str.as_bytes()); },
+                        Err(_) => {}
                     }
                 },
                 _ => {
                     *res.status_mut() = StatusCode::BadRequest;
-                    res.send(b"Invalid path.").unwrap();
+                    let _ = res.send(b"Invalid path.");
                 }
             }
         }, 4).unwrap();

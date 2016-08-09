@@ -24,7 +24,7 @@ pub fn init_crypto() {
     }
 }
 
-pub fn get_cipher_by_name(name: &String) -> Option<*const openssl_ffi::EVP_CIPHER> {
+pub fn get_cipher_by_name(name: &String) -> Option<*mut openssl_ffi::EVP_CIPHER> {
     unsafe {
         let ptr = openssl_ffi::EVP_get_cipherbyname(CString::new(name.clone()).unwrap().as_ptr() as *const u8);
         if ptr.is_null() {

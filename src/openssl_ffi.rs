@@ -12,17 +12,8 @@ pub struct EVP_CIPHER {
     pub block_size: c_int,
     pub key_len: c_int,
     pub iv_len: c_int,
-    pub flags: u32,
-    // a lot of these function pointers are dependent on other structures
-    // we don't need them, so I've just pretended they're void pointers
-    init: *mut c_void,
-    do_cipher: *mut c_void,
-    cleanup: *mut c_void,
-    ctx_size: c_int,
-    set_asn1_parameters: *mut c_void,
-    get_asn1_parameters: *mut c_void,
-    ctrl: *mut c_void,
-    app_data: *mut c_void
+    pub flags: u32
+    // More is actually here, but it's hard to expose
 }
 
 #[repr(C)]
@@ -51,21 +42,14 @@ pub struct EVP_MD {
     type_num: c_int,
     pkey_type: c_int,
     md_size: c_int,
-    flags: c_ulong,
-    init: *mut c_void,
-    update: *mut c_void,
-    finalize: *mut c_void,
-    copy: *mut c_void,
-    cleanup: *mut c_void,
-    block_size: c_int,
-    ctx_size: c_int
+    flags: c_ulong
 }
 
 #[link(name = "crypto")]
 extern {
     pub fn OPENSSL_add_all_algorithms_noconf() -> c_int;
     pub fn EVP_get_cipherbyname(name: *const u8) -> *mut EVP_CIPHER;
-    pub fn EVP_md5() -> *const EVP_MD;
+    pub fn EVP_md5() -> *mut EVP_MD;
     pub fn EVP_BytesToKey(cipher: *const EVP_CIPHER, md: *const EVP_MD, salt: *const u8, data: *const u8, datal: c_int, count: c_int, key: *mut u8, iv: *mut u8) -> c_int;
     pub fn EVP_CIPHER_CTX_new() -> *mut EVP_CIPHER_CTX;
     pub fn EVP_DecryptInit_ex(ctx: *const EVP_CIPHER_CTX, cipher: *const EVP_CIPHER, engine: *const c_void, key: *const u8, iv: *const u8) -> c_int;
