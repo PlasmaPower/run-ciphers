@@ -21,7 +21,7 @@ fn check_data(ciphertext: &Vec<u8>, cipher: *const openssl_ffi::EVP_CIPHER, key_
     }
 }
 
-pub fn run_passwords(possible_ciphertexts: &str, possible_ciphers: &str, passwords: &Vec<Vec<u8>>) -> Vec<String> {
+pub fn run_passwords<T>(possible_ciphertexts: &str, possible_ciphers: &str, passwords: Box<T>) -> Vec<String> where T: IntoIterator<Item=Vec<u8>> {
     openssl::init_crypto();
     let mut ciphers_file = File::open(possible_ciphers).unwrap();
     let mut ciphers_string = String::new();
@@ -49,7 +49,7 @@ pub fn run_passwords(possible_ciphertexts: &str, possible_ciphers: &str, passwor
         }
         None
     }).collect::<Vec<_>>();
-    let passwords = passwords.clone().iter().map(|pass| pass.clone())
+    let passwords = passwords.into_iter().map(|pass| pass.clone())
         .map(|mut pass| { pass.extend(salt.iter().clone()); return pass; })
         .collect::<Vec<_>>();
     let mut result = vec![];
@@ -66,7 +66,7 @@ pub fn run_passwords(possible_ciphertexts: &str, possible_ciphers: &str, passwor
                             check_data(&ciphertext, openssl::get_cipher_by_name(&cipher).unwrap(), &key_iv_pair)
                         }));
                     }
-                }
+                },
                 None => println!("key creation failed")
             }
         }

@@ -61,28 +61,29 @@ fn main() {
 
     let possible_ciphertexts = String::from(matches.value_of("possible-ciphertexts").unwrap());
     let possible_ciphers = String::from(matches.value_of("possible-ciphers").unwrap());
-    let run_passwords = move |passwords| run_passwords::run_passwords(&possible_ciphertexts, &possible_ciphers, &passwords);
+    macro_rules! run_passwords {
+        ($passwords: expr) => (run_passwords::run_passwords(&possible_ciphertexts, &possible_ciphers, Box::new($passwords)));
+    }
     if let Some(matches) = matches.subcommand_matches("files") {
         let passwords = matches.values_of("file").unwrap()
-            .map(|arg| utils::read_binary_file(&Path::new(arg)))
-            .collect();
-        for pass in run_passwords(passwords) {
+            .map(|arg| utils::read_binary_file(&Path::new(arg)));
+        for pass in run_passwords!(passwords) {
             println!("FOUND UTF-8 STRING!!!\n{}", pass);
         }
     } else if let Some(matches) = matches.subcommand_matches("args") {
-        let passwords = matches.values_of("password").unwrap().map(|string| Vec::from(string.as_bytes())).collect();
-        for pass in run_passwords(passwords) {
+        let passwords = matches.values_of("password").unwrap().map(|string| Vec::from(string.as_bytes()));
+        for pass in run_passwords!(passwords) {
             println!("FOUND UTF-8 STRING!!!\n{}", pass);
         }
     } else if matches.subcommand_matches("stdin").is_some() {
         let mut stdin_str: String = String::new();
         io::stdin().read_to_string(&mut stdin_str).unwrap();
-        let passwords = stdin_str.split("\n").filter(|str| str.len() > 0).map(|str| Vec::from(str.as_bytes())).collect();
-        for pass in run_passwords(passwords) {
+        let passwords = stdin_str.split("\n").filter(|str| str.len() > 0).map(|str| Vec::from(str.as_bytes()));
+        for pass in run_passwords!(passwords) {
             println!("FOUND UTF-8 STRING!!!\n{}", pass);
         }
     } else if let Some(matches) = matches.subcommand_matches("http") {
-        Server::http(matches.value_of("listen-address").unwrap()).unwrap().handle(move |req: Request, mut res: Response| {
+        Server::http(matches.value_of("listen-address").unwrap()).unwrap().handle_threads(move |req: Request, mut res: Response| {
             match req.uri {
                 RequestUri::AbsolutePath(string) => {
                     if !string.starts_with('/') {
@@ -90,7 +91,7 @@ fn main() {
                         res.send(b"Invalid path.").unwrap();
                         return;
                     }
-                    match panic::catch_unwind(|| run_passwords(vec![Vec::from(String::from(&string[1..]).as_bytes())])) {
+                    match panic::catch_unwind(|| run_passwords!(vec![string[1..].as_bytes().iter().map(|n| n.clone()).collect()])) {
                         Ok(result) => res.send(result.join("\n\n\n\n").as_bytes()).unwrap(),
                         Err(_) => {
                             *res.status_mut() = StatusCode::InternalServerError;
@@ -103,6 +104,6 @@ fn main() {
                     res.send(b"Invalid path.").unwrap();
                 }
             }
-        }).unwrap();
+        }, 4).unwrap();
     }
 }
