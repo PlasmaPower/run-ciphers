@@ -77,7 +77,7 @@ impl DecryptionContext {
             for ciphertext in self.ciphertexts.iter() {
               unsafe {
                 let cipher_box = Box::from_raw(cipher);
-                let ciphertext = ciphertext.clone(); // TODO remove
+                let ciphertext = ciphertext.clone();
                 threads.push(thread::spawn(move || {
                   match openssl::decrypt(&ciphertext, Box::into_raw(cipher_box), &key_iv_pair) {
                     None => None,
