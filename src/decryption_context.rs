@@ -17,15 +17,20 @@ pub struct CipherResult {
     pub string: String
 }
 
-pub struct DecryptionContext {
-    ciphertexts: Vec<Vec<u8>>,
-    ciphers: Vec<String>,
-    salt: Vec<u8>
-}
-
 struct CiphertextThread {
     ciphertext: String,
     join_handle: thread::JoinHandle<Option<String>>
+}
+
+struct HashedData {
+    hash: String,
+    data: Vec<u8>
+}
+
+pub struct DecryptionContext {
+    ciphertexts: Vec<HashedData>,
+    ciphers: Vec<String>,
+    salt: Vec<u8>
 }
 
 impl DecryptionContext {
@@ -49,7 +54,7 @@ impl DecryptionContext {
             }
             None
         }).collect::<Vec<_>>();
-        let mut ciphertexts = Vec::new();
+        let mut ciphertexts: Vec<HashedData> = Vec::new();
         for ciphertext in ciphertexts_full {
             assert_eq!(&ciphertext[0..8], b"Salted__");
             if salt_found {
@@ -58,7 +63,13 @@ impl DecryptionContext {
                 salt = ciphertext[8..16].to_vec();
                 salt_found = true;
             }
-            ciphertexts.push(ciphertext[16..].to_vec());
+            ciphertexts.push(HashedData {
+                data: ciphertext[16..].to_vec(),
+                hash: md5::compute(&ciphertext[..]).iter()
+                                        .map(|n| format!("{:x}", n))
+                                        .collect::<Vec<_>>()
+                                        .concat()
+            });
         }
         DecryptionContext {
             ciphertexts: ciphertexts,
@@ -72,25 +83,23 @@ impl DecryptionContext {
             .map(|mut pass| { pass.extend(self.salt.iter().clone()); return pass; })
             .collect::<Vec<_>>();
         let mut result = vec![];
-        for password in passwords.iter() {
+        for password in passwords {
             for cipher_name in self.ciphers.iter() {
                 let cipher = match openssl::get_cipher_by_name(cipher_name) {
                     Some(cipher) => cipher,
                     None => continue
                 };
                 let mut threads = vec![];
-                let possible_key = openssl::get_key_iv_pair(cipher, password);
+                let possible_key = openssl::get_key_iv_pair(cipher, &password);
                 match possible_key {
                     Some(key_iv_pair) => {
                         for ciphertext in self.ciphertexts.iter() {
                             unsafe {
                                 let cipher_box = Box::from_raw(cipher);
-                                let ciphertext = ciphertext.clone();
+                                let ciphertext_hash = ciphertext.hash.clone();
+                                let ciphertext = ciphertext.data.clone();
                                 threads.push(CiphertextThread {
-                                    ciphertext: md5::compute(&ciphertext[..]).iter()
-                                        .map(|n| format!("{:x}", n))
-                                        .collect::<Vec<_>>()
-                                        .concat(),
+                                    ciphertext: ciphertext_hash,
                                     join_handle: thread::spawn(move || {
                                         match openssl::decrypt(&ciphertext, Box::into_raw(cipher_box), &key_iv_pair) {
                                             None => None,
