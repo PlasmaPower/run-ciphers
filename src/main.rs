@@ -5,6 +5,7 @@ extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
 
 extern crate hyper;
+use hyper::header;
 use hyper::server::{Server, Request, Response};
 use hyper::uri::RequestUri;
 use hyper::status::StatusCode;
@@ -86,6 +87,7 @@ fn main() {
         }
     } else if let Some(matches) = matches.subcommand_matches("http") {
         Server::http(matches.value_of("listen-address").unwrap()).unwrap().handle_threads(move |req: Request, mut res: Response| {
+            res.headers_mut().set(header::AccessControlAllowOrigin::Any);
             match req.uri {
                 RequestUri::AbsolutePath(string) => {
                     if !string.starts_with('/') {
@@ -94,8 +96,14 @@ fn main() {
                         return;
                     }
                     match json::encode(&decryption_context.decrypt(vec![string[1..].as_bytes().iter().map(|n| n.clone()).collect()])) {
-                        Ok(str) => { let _ = res.send(str.as_bytes()); },
-                        Err(_) => {}
+                        Ok(str) => {
+                            res.headers_mut().set(header::ContentType::json());
+                            let _ = res.send(str.as_bytes());
+                        },
+                        Err(_) => {
+                            *res.status_mut() = StatusCode::InternalServerError;
+                            let _ = res.send(b"Unable to encode result as JSON.");
+                        }
                     }
                 },
                 _ => {
