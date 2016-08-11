@@ -1,5 +1,9 @@
 use std::path::Path;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
+use std::fs::{File, OpenOptions};
+
+use std::cell::RefCell;
+use std::ops::Deref;
 
 extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
@@ -19,6 +23,12 @@ mod utils;
 mod decryption_context;
 
 use decryption_context::DecryptionContext;
+
+#[derive(RustcEncodable)]
+pub struct LogEntry {
+    query: String,
+    result: Vec<decryption_context::CipherResult>
+}
 
 fn main() {
     let matches = App::new("Run Ciphers")
@@ -61,7 +71,12 @@ fn main() {
                          .long("listen-address")
                          .value_name("ADDRESS")
                          .default_value("0.0.0.0:80")
-                         .help("Listen on this address")))
+                         .help("Listen on this address"))
+                    .arg(Arg::with_name("log-file")
+                         .short("l")
+                         .long("log-file")
+                         .value_name("FILE")
+                         .help("Log tried passwords and results to this file")))
         .get_matches();
 
     let possible_ciphertexts = String::from(matches.value_of("possible-ciphertexts").unwrap());
@@ -86,6 +101,8 @@ fn main() {
             println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
         }
     } else if let Some(matches) = matches.subcommand_matches("http") {
+        let log_file_match = matches.value_of("log-file").map(|s| String::from(s));
+        thread_local!(static LOG_FILE: RefCell<Option<Result<RefCell<File>, io::Error>>> = RefCell::new(None));
         Server::http(matches.value_of("listen-address").unwrap()).unwrap().handle_threads(move |req: Request, mut res: Response| {
             res.headers_mut().set(header::AccessControlAllowOrigin::Any);
             match req.uri {
@@ -95,8 +112,30 @@ fn main() {
                         let _ = res.send(b"Invalid path.");
                         return;
                     }
-                    match json::encode(&decryption_context.decrypt(vec![string[1..].as_bytes().iter().map(|n| n.clone()).collect()])) {
+                    let query = String::from(&string[1..]);
+                    let result = decryption_context.decrypt(vec![query.as_bytes().iter().map(|n| n.clone()).collect()]);
+                    match json::encode(&result) {
                         Ok(str) => {
+                            if let Some(ref log_file_path) = log_file_match {
+                                LOG_FILE.with(|log_file_cache| {
+                                    let mut log_file = log_file_cache.borrow_mut();
+                                    if log_file.is_none() {
+                                        let new_log_file = Some(OpenOptions::new()
+                                                                .create(true)
+                                                                .write(true)
+                                                                .append(true)
+                                                                .open(log_file_path).map(|f| RefCell::new(f)));
+                                        *log_file = new_log_file;
+                                    }
+                                    if let &Some(Ok(ref file)) = log_file.deref() {
+                                        if let Ok(mut entry) = json::encode(&LogEntry { query: query, result: result }) {
+                                            entry.push('\0');
+                                            let _ = file.borrow_mut().write(entry.as_bytes());
+                                            let _ = file.borrow_mut().flush();
+                                        }
+                                    }
+                                });
+                            }
                             res.headers_mut().set(header::ContentType::json());
                             let _ = res.send(str.as_bytes());
                         },
