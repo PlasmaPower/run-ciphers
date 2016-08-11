@@ -104,6 +104,9 @@ impl DecryptionContext {
                                         match openssl::decrypt(&ciphertext, Box::into_raw(cipher_box), &key_iv_pair) {
                                             None => None,
                                             Some(data) => {
+                                                if data.iter().filter(|n| **n == 0).count() >= data.len() / 2 {
+                                                    return None;
+                                                }
                                                 match String::from_utf8(data) {
                                                     Result::Ok(string) => Some(string),
                                                     Result::Err(_) => None
