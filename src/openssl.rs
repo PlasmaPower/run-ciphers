@@ -16,6 +16,17 @@ impl Clone for KeyIvPair {
     fn clone(&self) -> KeyIvPair { *self }
 }
 
+pub struct CipherType {
+    pub ptr: *const openssl_ffi::EVP_CIPHER
+}
+unsafe impl Send for CipherType {}
+impl Clone for CipherType {
+    fn clone(&self) -> Self {
+        CipherType { ptr: self.ptr }
+    }
+}
+impl Copy for CipherType {}
+
 pub fn init_crypto() {
     unsafe {
         if openssl_ffi::OPENSSL_add_all_algorithms_noconf() != 1 {
@@ -24,31 +35,31 @@ pub fn init_crypto() {
     }
 }
 
-pub fn get_cipher_by_name(name: &String) -> Option<*mut openssl_ffi::EVP_CIPHER> {
+pub fn get_cipher_by_name(name: &String) -> Option<CipherType> {
     unsafe {
         let ptr = openssl_ffi::EVP_get_cipherbyname(CString::new(name.clone()).unwrap().as_ptr() as *const u8);
         if ptr.is_null() {
             return None;
         }
-        return Some(ptr);
+        return Some(CipherType { ptr: ptr });
     }
 }
 
-pub fn get_key_iv_pair(cipher: *const openssl_ffi::EVP_CIPHER, data: &Vec<u8>) -> Option<KeyIvPair> {
+pub fn get_key_iv_pair(cipher: CipherType, data: &Vec<u8>) -> Option<KeyIvPair> {
     unsafe {
         let mut key: [u8; openssl_ffi::EVP_MAX_KEY_LENGTH] = [0; openssl_ffi::EVP_MAX_KEY_LENGTH];
         let mut iv: [u8; openssl_ffi::EVP_MAX_IV_LENGTH] = [0; openssl_ffi::EVP_MAX_IV_LENGTH];
-        if openssl_ffi::EVP_BytesToKey(cipher, openssl_ffi::EVP_md5(), ptr::null(), data.as_ptr(), data.len() as c_int, 1, key.as_mut_ptr(), iv.as_mut_ptr()) == 0 {
+        if openssl_ffi::EVP_BytesToKey(cipher.ptr, openssl_ffi::EVP_md5(), ptr::null(), data.as_ptr(), data.len() as c_int, 1, key.as_mut_ptr(), iv.as_mut_ptr()) == 0 {
             return None;
         }
         return Some(KeyIvPair { key: key, iv: iv });
     }
 }
 
-pub fn decrypt(ciphertext: &Vec<u8>, cipher: *const openssl_ffi::EVP_CIPHER, key_iv_pair: &KeyIvPair) -> Option<Vec<u8>> {
+pub fn decrypt(ciphertext: &Vec<u8>, cipher: CipherType, key_iv_pair: &KeyIvPair) -> Option<Vec<u8>> {
     unsafe {
         let ctx: *mut openssl_ffi::EVP_CIPHER_CTX = openssl_ffi::EVP_CIPHER_CTX_new();
-        if openssl_ffi::EVP_DecryptInit_ex(ctx, cipher, ptr::null(), key_iv_pair.key.as_ptr(), key_iv_pair.iv.as_ptr()) != 1 {
+        if openssl_ffi::EVP_DecryptInit_ex(ctx, cipher.ptr, ptr::null(), key_iv_pair.key.as_ptr(), key_iv_pair.iv.as_ptr()) != 1 {
             return None;
         }
         if ctx.is_null() {

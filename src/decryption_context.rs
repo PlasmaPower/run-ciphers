@@ -3,9 +3,10 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::vec::Vec;
-use std::thread;
+use std::sync::Mutex;
 
 extern crate md5;
+extern crate crossbeam;
 
 use utils;
 use openssl;
@@ -17,20 +18,15 @@ pub struct CipherResult {
     pub string: String
 }
 
-struct CiphertextThread {
-    ciphertext: String,
-    join_handle: thread::JoinHandle<Option<String>>
+pub struct DecryptionContext {
+    ciphertexts: Vec<HashedData>,
+    ciphers: Vec<String>,
+    salt: Vec<u8>
 }
 
 struct HashedData {
     hash: String,
     data: Vec<u8>
-}
-
-pub struct DecryptionContext {
-    ciphertexts: Vec<HashedData>,
-    ciphers: Vec<String>,
-    salt: Vec<u8>
 }
 
 impl DecryptionContext {
@@ -66,9 +62,9 @@ impl DecryptionContext {
             ciphertexts.push(HashedData {
                 data: ciphertext[16..].to_vec(),
                 hash: md5::compute(&ciphertext[..]).iter()
-                                        .map(|n| format!("{:x}", n))
-                                        .collect::<Vec<_>>()
-                                        .concat()
+                                   .map(|n| format!("{:x}", n))
+                                   .collect::<Vec<_>>()
+                                   .concat()
             });
         }
         DecryptionContext {
@@ -78,63 +74,58 @@ impl DecryptionContext {
         }
     }
 
-    pub fn decrypt<T>(&self, passwords: T) -> Vec<CipherResult> where T: IntoIterator<Item=Vec<u8>> {
-        let passwords = passwords.into_iter().map(|pass| pass.clone())
-            .map(|mut pass| { pass.extend(self.salt.iter().clone()); return pass; })
-            .collect::<Vec<_>>();
-        let mut result = vec![];
-        for password in passwords {
-            for cipher_name in self.ciphers.iter() {
-                let cipher = match openssl::get_cipher_by_name(cipher_name) {
-                    Some(cipher) => cipher,
-                    None => continue
-                };
-                let mut threads = vec![];
-                let possible_key = openssl::get_key_iv_pair(cipher, &password);
-                match possible_key {
-                    Some(key_iv_pair) => {
-                        for ciphertext in self.ciphertexts.iter() {
-                            unsafe {
-                                let cipher_box = Box::from_raw(cipher);
-                                let ciphertext_hash = ciphertext.hash.clone();
-                                let ciphertext = ciphertext.data.clone();
-                                threads.push(CiphertextThread {
-                                    ciphertext: ciphertext_hash,
-                                    join_handle: thread::spawn(move || {
-                                        match openssl::decrypt(&ciphertext, Box::into_raw(cipher_box), &key_iv_pair) {
-                                            None => None,
-                                            Some(data) => {
-                                                if data.iter().filter(|n| **n == 0).count() >= data.len() / 2 {
-                                                    return None;
-                                                }
-                                                match String::from_utf8(data) {
-                                                    Result::Ok(string) => Some(string),
-                                                    Result::Err(_) => None
-                                                }
-                                            }
-                                        }
-                                    })
+    pub fn decrypt<F>(&self, password: Vec<u8>, callback: F)
+        where F: Fn(CipherResult) {
+        let mut password = password.clone();
+        password.extend(self.salt.iter().cloned());
+        for cipher_name in self.ciphers.iter() {
+            let cipher = match openssl::get_cipher_by_name(cipher_name) {
+                Some(cipher) => cipher,
+                None => continue
+            };
+            let possible_key = openssl::get_key_iv_pair(cipher, &password);
+            match possible_key {
+                Some(key_iv_pair) => {
+                    for ciphertext in self.ciphertexts.iter() {
+                        openssl::decrypt(&ciphertext.data, cipher, &key_iv_pair)
+                            .and_then(|data| {
+                                if data.iter().filter(|n| **n == 0).count() < data.len() / 2 {
+                                    return Some(data);
+                                }
+                                None
+                            })
+                            .and_then(|data| String::from_utf8(data).ok())
+                            .and_then(|string| -> Option<String> {
+                                callback(CipherResult {
+                                    ciphertext: ciphertext.hash.clone(),
+                                    cipher: cipher_name.clone(),
+                                    string: string.clone()
                                 });
-                            }
-                        }
-                    }
-                    None => {}
-                }
-                for ciphertext_thread in threads {
-                    match ciphertext_thread.join_handle.join() {
-                        Ok(res) => match res {
-                            Some(string) => result.push(CipherResult {
-                                ciphertext: ciphertext_thread.ciphertext,
-                                cipher: cipher_name.clone(),
-                                string: string
-                            }),
-                            None => {}
-                        },
-                        Err(_) => {}
+                                None
+                            });
                     }
                 }
+                None => {}
             }
         }
-        result
+    }
+
+    pub fn decrypt_and_collect(&self, password: Vec<u8>) -> Vec<CipherResult> {
+        let results = Mutex::new(vec![]);
+        self.decrypt(password, |result| results.lock().unwrap().push(result));
+        return results.into_inner().unwrap();
+    }
+
+    pub fn run_passwords<T>(&self, passwords: T) where T: IntoIterator<Item=Vec<u8>> {
+        crossbeam::scope(move |scope| {
+            for password in passwords {
+                let password = password.clone();
+                scope.spawn(move || {
+                    self.decrypt(password, |result: CipherResult| {
+                        println!("Cipher {} generates UTF-8 string!\n{}", result.cipher, result.string);
+                    });
+                });
+            }
+        });
     }
 }

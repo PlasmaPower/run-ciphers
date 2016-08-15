@@ -85,21 +85,15 @@ fn main() {
     if let Some(matches) = matches.subcommand_matches("files") {
         let passwords = matches.values_of("file").unwrap()
             .map(|arg| utils::read_binary_file(&Path::new(arg)));
-        for res in decryption_context.decrypt(passwords) {
-            println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
-        }
+        decryption_context.run_passwords(passwords);
     } else if let Some(matches) = matches.subcommand_matches("args") {
         let passwords = matches.values_of("password").unwrap().map(|string| Vec::from(string.as_bytes()));
-        for res in decryption_context.decrypt(passwords) {
-            println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
-        }
+        decryption_context.run_passwords(passwords);
     } else if matches.subcommand_matches("stdin").is_some() {
         let mut stdin_str: String = String::new();
         io::stdin().read_to_string(&mut stdin_str).unwrap();
         let passwords = stdin_str.split("\n").filter(|str| str.len() > 0).map(|str| Vec::from(str.as_bytes()));
-        for res in decryption_context.decrypt(passwords) {
-            println!("Cipher {} generates UTF-8 string!\n{}", res.cipher, res.string);
-        }
+        decryption_context.run_passwords(passwords);
     } else if let Some(matches) = matches.subcommand_matches("http") {
         let log_file_match = matches.value_of("log-file").map(|s| String::from(s));
         thread_local!(static LOG_FILE: RefCell<Option<Result<RefCell<File>, io::Error>>> = RefCell::new(None));
@@ -113,7 +107,7 @@ fn main() {
                         return;
                     }
                     let query = String::from(&string[1..]);
-                    let result = decryption_context.decrypt(vec![query.as_bytes().iter().map(|n| n.clone()).collect()]);
+                    let result = decryption_context.decrypt_and_collect(query.as_bytes().to_vec());
                     match json::encode(&result) {
                         Ok(str) => {
                             if let Some(ref log_file_path) = log_file_match {
